@@ -21,6 +21,12 @@ class Client:
     INSTANCES = {}
     END_OF_AUDIO = "END_OF_AUDIO"
 
+    def default_callback(text, is_final):
+        # Truncate to last 3 entries for brevity.
+        text = text[-3:]
+        utils.clear_screen()
+        utils.print_transcript(text)
+
     def __init__(
         self,
         host=None,
@@ -30,6 +36,7 @@ class Client:
         model="small",
         srt_file_path="output.srt",
         use_vad=True,
+        callback=None,
         log_transcription=True,
         max_clients=4,
         max_connection_time=600,
@@ -69,6 +76,7 @@ class Client:
         self.log_transcription = log_transcription
         self.max_clients = max_clients
         self.max_connection_time = max_connection_time
+        self.callback = callback if callback is not None else Client.default_callback
 
         if translate:
             self.task = "translate"
@@ -112,7 +120,7 @@ class Client:
         elif status == "WARNING":
             print(f"Message from Server: {message_data['message']}")
 
-    def process_segments(self, segments):
+    def process_segments(self, segments, is_final):
         """Processes transcript segments."""
         text = []
         for i, seg in enumerate(segments):
@@ -129,11 +137,7 @@ class Client:
             self.last_response_received = time.time()
             self.last_received_segment = segments[-1]["text"]
 
-        if self.log_transcription:
-            # Truncate to last 3 entries for brevity.
-            text = text[-3:]
-            utils.clear_screen()
-            utils.print_transcript(text)
+        self.callback(text, is_final)
 
     def on_message(self, ws, message):
         """
@@ -178,7 +182,7 @@ class Client:
             return
 
         if "segments" in message.keys():
-            self.process_segments(message["segments"])
+            self.process_segments(message["segments"], message["is_final"])
 
     def on_error(self, ws, error):
         print(f"[ERROR] WebSocket Error: {error}")
@@ -693,36 +697,6 @@ class TranscriptionClient(TranscriptionTeeClient):
         transcription_client()
         ```
     """
-    def __init__(
-        self,
-        host,
-        port,
-        lang=None,
-        translate=False,
-        model="small",
-        use_vad=True,
-        save_output_recording=False,
-        output_recording_filename="./output_recording.wav",
-        output_transcription_path="./output.srt",
-        log_transcription=True,
-        max_clients=4,
-        max_connection_time=600,
-        mute_audio_playback=False,
-    ):
-        self.client = Client(
-            host, port, lang, translate, model, srt_file_path=output_transcription_path,
-            use_vad=use_vad, log_transcription=log_transcription, max_clients=max_clients,
-            max_connection_time=max_connection_time
-        )
-
-        if save_output_recording and not output_recording_filename.endswith(".wav"):
-            raise ValueError(f"Please provide a valid `output_recording_filename`: {output_recording_filename}")
-        if not output_transcription_path.endswith(".srt"):
-            raise ValueError(f"Please provide a valid `output_transcription_path`: {output_transcription_path}. The file extension should be `.srt`.")
-        TranscriptionTeeClient.__init__(
-            self,
-            [self.client],
-            save_output_recording=save_output_recording,
-            output_recording_filename=output_recording_filename,
-            mute_audio_playback=mute_audio_playback
-        )
+    def __init__(self, host, port, lang=None, translate=False, model="small", use_vad=True, callback = None):
+        self.client = Client(host, port, lang, translate, model, srt_file_path="output.srt", use_vad=use_vad, callback = callback)
+        TranscriptionTeeClient.__init__(self, [self.client])
